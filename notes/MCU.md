@@ -208,3 +208,158 @@ as "software flow control".
 - 8 data bits
 - 1 parity bit
 - 1 stop bit
+
+## MCU
+- [Debugging ARM based microcontrollers in neovim with
+  gdb](https://chmanie.com/post/2020/07/18/debugging-arm-based-microcontrollers-in-neovim-with-gdb/)
+- [Bare Metal STM32
+  Programming](https://vivonomicon.com/2018/04/02/bare-metal-stm32-programming-part-1-hello-arm/)
+- [GCC arm
+  cross-compiler](https://developer.arm.com/tools-and-software/open-source-software/developer-tools/gnu-toolchain/gnu-rm/downloads)
+
+General information about MCUs.
+
+Note: for Linux serial, use `minicom`.
+
+## STM32
+
+There are different ways to achieve this.
+
+- [Platformio libre, multiple vendors compilation tool](platformio.org)
+- [Start Developing STM32 on
+  Linux](https://www.instructables.com/Start-Developing-STM32-on-Linux/)
+- [Learning STM32](https://riptutorial.com/ebook/stm32)
+
+- STM32Nucleo: Device
+- STM32Cube: IDE suite (not necessary)
+- STM32CubeMX: Code generator
+- STLink-V2: Hardware programmer
+- STLink: Firmware programmer
+- [OpenOCD](https://sourceforge.net/p/openocd/code/ci/master/tree/): Firmware
+  debugger and programmer
+- SWD: Serial Wire Debug
+- [libopemcm3](https://github.com/libopencm3/): Low level libre library for ARM
+  cortex
+- newlib: _one_ C standard library implementation for embedded devices
+
+Notes:
+
+- It is recommended to compile Open On-Chip Debugger from source
+- STLink has a GUI (`stlink-gui`)
+- STLink-V2 can be replaced with a USB-serail converter (like the FT232,
+  CP2102...), but it gives you debugging options
+- STM32CubeIDE can generate Makefile projects
+
+### arm coss-compiler
+
+- install gcc and newlib: `pacman -S arm-none-eabi-gcc arm-none-eabi-newlib`
+- optionally install utilities: `pacman -S arm-none-eabi-binutils`: utilities
+  like objcpy, objdump, strip, readelf, ar, as, ld, etc
+
+### flashing with ST-LINK
+
+- [libopemcm3 examples](https://github.com/libopencm3/libopencm3-examples)
+- [Linux STM32 Discovery
+  GCC](https://www.wolinlabs.com/blog/linux.stm32.discovery.gcc.html)
+- [STM32 Boitier
+  ST-LINK](https://riton-duino.blogspot.com/2019/03/stm32-boitier-st-link.html)
+
+One way to flash the device is:
+
+- Add the following udev rule:
+
+```
+# /etc/udev/rules.d/45-usb-stlink-v2.rules
+
+#FT232
+ATTRS{idProduct}=="6014", ATTRS{idVendor}=="0403", MODE="666", GROUP="plugdev"
+
+#FT2232
+ATTRS{idProduct}=="6010", ATTRS{idVendor}=="0403", MODE="666", GROUP="plugdev"
+
+#FT230X
+ATTRS{idProduct}=="6015", ATTRS{idVendor}=="0403", MODE="666", GROUP="plugdev"
+
+#STLINK V1
+ATTRS{idProduct}=="3744", ATTRS{idVendor}=="0483", MODE="666", GROUP="plugdev"
+
+#STLINK V2
+ATTRS{idProduct}=="3748", ATTRS{idVendor}=="0483", MODE="666", GROUP="plugdev"
+
+#STLINK V2.1
+ATTRS{idProduct}=="374b", ATTRS{idVendor}=="0483", MODE="666", GROUP="plugdev"
+```
+
+Note: The user should belong to the `GROUP` named above.
+
+- connect the device through your STLink-V2 (or integrated ST-LINK hw)
+- probe to see if the board is correctly connected: `st-info --probe`
+- erase the MCU: `st-flash erase`
+
+Write a program with `libopencm3` library as a substitute for HAL. Create a
+linker script defining
+the ROM and RAM.
+
+- compile to object: `arm-none-eabi-gcc -mcpu=cortex-m3 -mthumb -Wall -g -O0 -I
+  . -I lib/inc -c -o
+  main.o main.c`
+- link to ELF: `arm-none-eabi-gcc
+  -Wl,--gc-sections,-Map=main.elf.map,-cref,-u,Reset_Handler -I . -I
+  lib/inc -L lib -T stm32.ld main.o stm32f10x_it.o lib/libstm32.a --output
+  main.elf`
+- link to bin: `arm-none-eabi-objcopy -O binary main.elf main.bin`
+- program the firmware: `st-flash write main.bin 0x08000000` (this number
+  corresponds to a region
+  configured by the linker as ROM)
+- STM32CubeMX can create Makefile
+
+### flashing with OpenOCD
+
+- [Flashing and debugging STM32 microcontrollers under
+  Linux](https://cycling-touring.net/2018/12/flashing-and-debugging-stm32-microcontrollers-under-linux)
+- [STM OpenOCD fork](https://github.com/STMicroelectronics/OpenOCD): this may
+  have been merged to the official later on.
+
+- install telnet
+- copy the udev rule inside `/usr/share/openocd/contrib` to the udev
+- search for your config file under `/usr/share/openocd/script`, there are
+  config files for MCU, programmers - and board, which combine both
+- use `openocd -f config1.cfg -f ...`: this opens a telnet (programming) and tcl
+  (debugging) connections
+- `telnet localhost <port>`: to get the programming interface in another
+  terminal
+- type:
+
+```
+init
+reset init
+halt
+flash write_image erase myprogram.elf
+exit
+```
+
+#### debugging with OpenOCD
+
+Do the above to open a tcl connection and then:
+
+- `arm-none-eabi-gdb myprogram.elf
+- `(gdb) target extended-remote localhost:3333` (assuming 3333 is the tcl port)
+- `(gdb) monitor reset halt`
+- `(gdb) load`
+
+### troubleshooting
+
+- After installation, try running `dmesg` and see if there is an error message
+  related to the STM. If there is an error message:
+  - test if you can run `st-link` and `st-util`
+  - try changing USB ports
+  - try updating the STLink through the IDE
+- [STM32 Standard Periferal
+  Library](https://www.st.com/en/embedded-software/stm32-standard-peripheral-libraries.html):
+  some MCUs are not included
+- If MCU is not included, then maybe try the STM32CubeMX
+
+### creating the Makefile from STM32CubeMX
+
+- [Makefile4CubeMX](https://github.com/duro80/Makefile4CubeMX)
+- [Hacky Makefile generator](https://github.com/baoshi/CubeMX2Makefile)
